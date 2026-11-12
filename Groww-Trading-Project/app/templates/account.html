@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Groww account</h1>
+    <p>Profile, funds and open positions via the Groww Trade API (TOTP login from <span class="mono">keys.txt</span>).</p>
+  </div>
+  <button class="btn" id="refreshBtn">↻ Refresh</button>
+</div>
+<div id="acctError"></div>
+<div class="kpis" id="fundKpis">
+  {% for i in range(6) %}<div class="kpi"><div class="skeleton" style="width:60%"></div><div class="skeleton" style="width:80%;height:22px;margin-top:10px"></div></div>{% endfor %}
+</div>
+<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));">
+  <div class="card"><h3>Profile</h3><div id="profile"><div class="skeleton"></div></div></div>
+  <div class="card"><h3>F&amp;O margin</h3><div id="fno"><div class="skeleton"></div></div></div>
+  <div class="card"><h3>Equity margin</h3><div id="eq"><div class="skeleton"></div></div></div>
+</div>
+<div class="card" style="margin-top:16px">
+  <div class="card-head"><h3>Open positions</h3><span class="muted" id="posCount"></span></div>
+  <div id="positions" class="table-wrap"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const LABELS = {
+  vendor_user_id: "User ID", ucc: "UCC", nse_enabled: "NSE", bse_enabled: "BSE", ddpi_enabled: "DDPI",
+  active_segments: "Active segments", clear_cash: "Clear cash", net_margin_used: "Net margin used",
+  brokerage_and_charges: "Brokerage & charges", collateral_used: "Collateral used",
+  collateral_available: "Collateral available", adhoc_margin: "Ad-hoc margin",
+};
+const pretty = k => LABELS[k] || k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+function kv(obj) {
+  if (!obj || typeof obj !== "object") return '<div class="muted">Not available</div>';
+  const rows = Object.entries(obj).filter(([, v]) => typeof v !== "object" || Array.isArray(v)).map(([k, v]) => {
+    let s = v;
+    if (typeof v === "number") s = /enabled/.test(k) ? v : fmtINR(v, 2);
+    else if (typeof v === "boolean") s = v ? '<span class="badge good">Yes</span>' : '<span class="badge">No</span>';
+    else if (Array.isArray(v)) s = v.map(x => `<span class="badge info">${esc(x)}</span>`).join(" ");
+    else s = esc(v);
+    return `<dt>${esc(pretty(k))}</dt><dd>${s}</dd>`;
+  });
+  return `<dl class="kv">${rows.join("")}</dl>`;
+}
+function kpi(label, v, sub = "") {
+  return `<div class="kpi"><div class="label">${label}</div><div class="value">${fmtINR(v, 0)}</div><div class="sub">${sub}</div></div>`;
+}
+async function load() {
+  $("#acctError").innerHTML = "";
+  try {
+    const d = await api("/api/account");
+    const m = d.margins || {}, f = m.fno_margin_details || {}, e = m.equity_margin_details || {};
+    $("#fundKpis").innerHTML = [
+      kpi("Clear cash", m.clear_cash, "available funds"),
+      kpi("Margin used", m.net_margin_used, "net, all segments"),
+      kpi("Option buy bal.", f.option_buy_balance_available, "F&O"),
+      kpi("Option sell bal.", f.option_sell_balance_available, "F&O"),
+      kpi("Collateral avail.", m.collateral_available, "pledged"),
+      kpi("Charges", m.brokerage_and_charges, "brokerage & charges"),
+    ].join("");
+    $("#profile").innerHTML = kv(d.profile);
+    $("#fno").innerHTML = kv(f);
+    $("#eq").innerHTML = kv(e);
+    const pos = (d.positions && d.positions.positions) || [];
+    $("#posCount").textContent = `${pos.length} position(s)`;
+    $("#positions").innerHTML = pos.length ? `<table class="table"><thead><tr><th>Symbol</th><th>Segment</th><th>Product</th><th>Qty</th><th>Net price</th><th>Realised</th></tr></thead><tbody>${
+      pos.map(p => `<tr><td>${esc(p.trading_symbol)}</td><td>${esc(p.segment || "")}</td><td>${esc(p.product || "")}</td>
+        <td>${p.quantity ?? "—"}</td><td>${fmtNum(p.net_price)}</td><td class="${pnlClass(p.realised_pnl)}">${fmtINR(p.realised_pnl, 2)}</td></tr>`).join("")
+    }</tbody></table>` : stateHTML("empty", "No open positions", d.positions_error ? esc(d.positions_error) : "You are flat.");
+  } catch (err) {
+    $("#acctError").innerHTML = `<div class="banner error"><b>Could not reach Groww.</b>&nbsp;${esc(err.message)}</div>
+      <div class="banner info">Put your TOTP API key and TOTP secret in <span class="mono">keys.txt</span> (project root):<br>
+      <span class="mono">API_KEY=…</span><br><span class="mono">TOTP_SECRET=…</span><br>
+      Backtesting with already-downloaded or demo data works without a Groww connection.</div>`;
+    $("#fundKpis").innerHTML = "";
+    ["#profile", "#fno", "#eq"].forEach(s => $(s).innerHTML = '<div class="muted">—</div>');
+    $("#positions").innerHTML = stateHTML("error", "Not connected", "");
+  }
+}
+$("#refreshBtn").addEventListener("click", load);
+load();
+</script>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Data{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Market data</h1>
+    <p>1-minute NIFTY spot and option candles from the Groww API, stored in PostgreSQL. Re-runs only fetch what is missing.</p>
+  </div>
+</div>
+<div class="kpis" id="cov"></div>
+<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));">
+  <div class="card">
+    <h3>Download from Groww</h3>
+    <p class="muted" style="margin-top:0">Fetches the expiry calendar, NIFTY spot 1m (plus 14 warm-up days for the EMAs), then the
+      option contracts any mode could trade on each crossover (ITM5 + ATM to buy, ATM to sell) for every timeframe.</p>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end">
+      <label class="field"><span>From</span><input type="date" id="dFrom"></label>
+      <label class="field"><span>To</span><input type="date" id="dTo"></label>
+      <button class="btn primary" id="dlBtn">Download</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Demo data (no API needed)</h3>
+    <p class="muted" style="margin-top:0">Generates a reproducible <b>synthetic</b> NIFTY market (trending regimes + Black-Scholes option
+      prices, Tuesday weekly expiries) to try the app. Replaces any stored data. Results on demo data mean nothing for real trading.</p>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end">
+      <label class="field"><span>From</span><input type="date" id="mFrom"></label>
+      <label class="field"><span>To</span><input type="date" id="mTo"></label>
+      <button class="btn" id="demoBtn">Generate demo data</button>
+    </div>
+  </div>
+</div>
+<div class="card" style="margin-top:16px" id="progCard">
+  <div class="card-head"><h3>Job</h3><span class="muted" id="progState">idle</span></div>
+  <div class="progress"><div id="progBar"></div></div>
+  <div class="muted" style="margin-top:8px; font-size:13px" id="progMsg">No download running.</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const iso = d => d.toISOString().slice(0, 10);
+const today = new Date(); const back = new Date(Date.now() - 60 * 864e5);
+$("#dFrom").value = iso(back); $("#dTo").value = iso(today);
+$("#mFrom").value = iso(back); $("#mTo").value = iso(today);
+
+function kpi(label, v, sub) { return `<div class="kpi"><div class="label">${label}</div><div class="value" style="font-size:18px">${v ?? "—"}</div><div class="sub">${sub || ""}</div></div>`; }
+async function coverage() {
+  try {
+    const c = await api("/api/data/coverage");
+    const src = c.source === "demo" ? '<span class="badge warn">DEMO</span>' : (c.source === "groww" ? '<span class="badge good">GROWW</span>' : '<span class="badge">none</span>');
+    $("#cov").innerHTML = [
+      kpi("Source", src, "where candles came from"),
+      kpi("Spot from", c.spot_from, "first stored day"),
+      kpi("Spot to", c.spot_to, "last stored day"),
+      kpi("Spot days", c.spot_days, `${(c.spot_rows || 0).toLocaleString("en-IN")} candles`),
+      kpi("Option contracts", c.option_contracts, `${(c.option_rows || 0).toLocaleString("en-IN")} candles`),
+      kpi("Expiries", c.expiries, c.expiry_from ? `${c.expiry_from} → ${c.expiry_to}` : ""),
+    ].join("");
+  } catch (e) { $("#cov").innerHTML = `<div class="banner error" style="grid-column:1/-1">${esc(e.message)}</div>`; }
+}
+let timer = null;
+async function poll() {
+  try {
+    const p = await api("/api/data/progress");
+    const pct = p.total ? Math.round((p.done || 0) / p.total * 100) : (p.state === "done" ? 100 : 0);
+    $("#progBar").style.width = pct + "%";
+    $("#progState").innerHTML = p.state === "error" ? '<span class="neg">error</span>' : esc(p.state);
+    $("#progMsg").textContent = p.state === "idle" ? "No download running." :
+      `${p.step || ""} ${p.total ? `(${p.done}/${p.total})` : ""} ${p.message || ""}`;
+    if (p.running) { timer = setTimeout(poll, 800); } else { timer = null; coverage(); setBusy(false); }
+  } catch (e) { $("#progMsg").textContent = e.message; setBusy(false); }
+}
+function setBusy(b) { $("#dlBtn").disabled = b; $("#demoBtn").disabled = b; }
+async function start(body) {
+  setBusy(true);
+  try { const r = await api("/api/data/download", { method: "POST", body }); if (r.wiped) toast("Previous data replaced (different source)."); poll(); }
+  catch (e) { toast(e.message, true); setBusy(false); }
+}
+$("#dlBtn").addEventListener("click", () => start({ from: $("#dFrom").value, to: $("#dTo").value, source: "groww" }));
+$("#demoBtn").addEventListener("click", () => {
+  if (!confirm("Replace all stored market data with synthetic demo data?")) return;
+  start({ from: $("#mFrom").value, to: $("#mTo").value, source: "demo", wipe: true });
+});
+coverage(); poll();
+</script>
+{% endblock %}

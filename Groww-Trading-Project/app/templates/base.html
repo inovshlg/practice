@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}9/21 EMA{% endblock %} · Groww Algo</title>
+  <script>
+    (function () {
+      try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">
+    <span class="brand-mark">9/21</span>
+    <span>EMA Crossover<small>NIFTY options · Groww</small></span>
+  </a>
+  <nav class="nav">
+    <a href="/" class="{{ 'active' if page=='account' }}">Account</a>
+    <a href="/backtest" class="{{ 'active' if page=='backtest' }}">Backtest</a>
+    <a href="/live" class="{{ 'active' if page=='live' }}">Live / Paper</a>
+    <a href="/data" class="{{ 'active' if page=='data' }}">Data</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="status-pill" id="healthPill" title="System status"><i class="dot" id="healthDot"></i><span id="healthText">checking…</span></div>
+  <button class="icon-btn" id="themeBtn" title="Toggle light / dark theme" aria-label="Toggle theme">☾</button>
+</header>
+<main class="page">
+  {% block content %}{% endblock %}
+</main>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

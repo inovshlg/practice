@@ -1,0 +1,3 @@
+# Copy to keys.txt (never commit it). Groww → Trade API → generate a TOTP API key.
+API_KEY=paste-your-totp-api-key-here
+TOTP_SECRET=PASTEYOURTOTPSECRETHERE

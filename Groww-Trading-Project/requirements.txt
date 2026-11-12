@@ -1,0 +1,8 @@
+flask>=3.0,<4
+psycopg[binary]>=3.2,<4
+pandas>=2.2,<3
+numpy>=1.26
+pyotp>=2.9
+growwapi>=1.5,<2
+gunicorn>=22
+pytest>=8

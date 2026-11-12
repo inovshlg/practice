@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Live / Paper{% endblock %}
+{% block head %}
+<script src="{{ url_for('static', filename='vendor/lightweight-charts.standalone.production.js') }}"></script>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Live &amp; paper trading</h1>
+    <p>Same signal, rules and contract selection as the backtester. Paper fills at the option LTP with backtest slippage; Live sends MARKET / MIS orders to Groww.</p>
+  </div>
+  <div class="status-pill" style="font-size:13px"><i class="dot" id="engDot"></i><b id="engStatus">IDLE</b></div>
+</div>
+<div id="liveBanner"></div>
+
+<div class="workspace live">
+  <div class="grid" style="align-content:start">
+    <div class="card">
+      <h3>Engine</h3>
+      <div class="grid" style="gap:12px">
+        <div class="field"><span>Execution</span>
+          <div class="seg" id="segExec"><button data-v="PAPER" class="on">Paper</button><button data-v="LIVE">Live (real money)</button></div>
+        </div>
+        <label class="field"><span>Strategy mode</span>
+          <select id="lMode">{% for m in MODES %}<option value="{{ m }}" {{ 'selected' if m=='ATM_BUY' }}>{{ MODE_LABELS[m] }}</option>{% endfor %}</select></label>
+        <div class="field"><span>Timeframe</span>
+          <div class="seg" id="segLTf">{% for tf in TIMEFRAMES %}<button data-v="{{ tf }}" class="{{ 'on' if tf==15 }}">{{ tf }}m</button>{% endfor %}</div></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+          <label class="field"><span>Entry from</span><select id="lStart">{% for s in STARTS %}<option {{ 'selected' if s=='09:30' }}>{{ s }}</option>{% endfor %}</select></label>
+          <label class="field"><span>Cutoff</span><select id="lCut">{% for c in CUTOFFS %}<option {{ 'selected' if c=='14:30' }}>{{ c }}</option>{% endfor %}</select></label>
+          <label class="field"><span>Lots (×{{ LOT_SIZE }})</span><input type="number" id="lLots" min="1" max="{{ RISK.max_lots }}" value="1"></label>
+          <label class="field"><span>Max trades/day</span><input type="number" id="lMaxT" min="1" max="50" value="{{ RISK.max_trades_per_day }}"></label>
+          <label class="field" style="grid-column:1/-1"><span>Max realised loss/day (₹)</span><input type="number" id="lMaxL" min="0" step="500" value="{{ RISK.max_loss_per_day|int }}"></label>
+        </div>
+        <label class="field hidden" id="confirmWrap"><span class="neg">Type LIVE to confirm real orders</span><input id="lConfirm" placeholder="LIVE" autocomplete="off"></label>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button class="btn primary" id="startBtn" style="flex:1">▶ Start paper</button>
+        </div>
+        <div style="display:flex; gap:8px">
+          <button class="btn danger" id="stopFlatBtn" style="flex:1" disabled>■ Stop &amp; flatten</button>
+          <button class="btn" id="stopKeepBtn" disabled title="Stop the engine but leave any open position untouched">Stop, keep</button>
+        </div>
+        <div class="faint" style="font-size:12px">Signals that closed before you pressed Start are ignored. Square-off at 15:00 is automatic. Keep this server running during market hours.</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Replay a stored day (paper)</h3>
+      <p class="muted" style="margin-top:0; font-size:13px">Drives the real engine minute-by-minute through stored candles with the settings above — use it to rehearse before going live. It should match the backtest exactly.</p>
+      <div style="display:flex; gap:8px; align-items:flex-end">
+        <label class="field" style="flex:1"><span>Day</span><input type="date" id="rDay"></label>
+        <button class="btn" id="replayBtn">Replay</button>
+      </div>
+      <div id="replayOut" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div class="right-col">
+    <div class="kpis" style="grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); margin:0" id="liveKpis"></div>
+    <div class="card chart-card">
+      <div class="card-head" style="padding:4px 6px 0">
+        <div class="legend"><span><i style="background:var(--amber)"></i>EMA 9</span><span><i style="background:var(--blue)"></i>EMA 21</span><span class="faint" id="liveNote"></span></div>
+        <span class="muted" style="font-size:12px" id="lastTick"></span>
+      </div>
+      <div class="chart" id="liveChart" style="height:360px"></div>
+    </div>
+    <div class="split two">
+      <div class="card"><h3>Open position</h3><div id="posCard"></div></div>
+      <div class="card"><div class="card-head"><h3>Event log</h3><span class="faint" style="font-size:12px">latest first</span></div><div class="scroll-y" id="events" style="max-height:300px"></div></div>
+    </div>
+    <div class="card"><div class="card-head"><h3>Closed trades (this session)</h3><span id="closedSum"></span></div><div class="table-wrap" id="closed"></div></div>
+    <div class="card"><div class="card-head"><h3>Journal (all sessions)</h3><button class="btn sm" id="histBtn">↻</button></div>
+      <div class="seg" id="segHist" style="margin-bottom:10px"><button data-v="positions" class="on">Trades</button><button data-v="orders">Orders</button><button data-v="sessions">Sessions</button></div>
+      <div class="table-wrap scroll-y" id="hist"></div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.LOT_SIZE = {{ LOT_SIZE }};</script>
+<script src="{{ url_for('static', filename='js/live.js') }}"></script>
+{% endblock %}

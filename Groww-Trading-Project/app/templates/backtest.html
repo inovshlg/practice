@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Backtest{% endblock %}
+{% block head %}
+<script src="{{ url_for('static', filename='vendor/lightweight-charts.standalone.production.js') }}"></script>
+{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Backtest &amp; trade audit</h1>
+    <p>9/21 EMA crossover on closed NIFTY spot bars → NIFTY weekly options. Three execution modes on identical signals.</p>
+  </div>
+  <div id="dataBadge"></div>
+</div>
+
+<!-- Filter bar: server params (left) + client filters (right) -->
+<div class="filterbar" id="filters">
+  <label class="field"><span>From</span><input type="date" id="fFrom"></label>
+  <label class="field"><span>To</span><input type="date" id="fTo"></label>
+  <div class="field"><span>Timeframe</span>
+    <div class="seg" id="segTf">{% for tf in TIMEFRAMES %}<button data-v="{{ tf }}" class="{{ 'on' if tf==15 }}">{{ tf }}m</button>{% endfor %}</div>
+  </div>
+  <label class="field"><span>Entry from</span>
+    <select id="fStart">{% for s in STARTS %}<option {{ 'selected' if s=='09:30' }}>{{ s }}</option>{% endfor %}</select></label>
+  <label class="field"><span>Cutoff</span>
+    <select id="fCut">{% for c in CUTOFFS %}<option {{ 'selected' if c=='14:30' }}>{{ c }}</option>{% endfor %}</select></label>
+  <label class="field"><span>Lots ×{{ LOT_SIZE }}</span><input type="number" id="fLots" min="1" max="50" value="1" style="width:70px"></label>
+  <button class="btn primary" id="runBtn">Run backtest</button>
+  <div class="divider"></div>
+  <div class="field"><span>Mode</span>
+    <div class="seg" id="segMode">{% for m in MODES %}<button data-v="{{ m }}" class="{{ 'on' if loop.first }}">{{ MODE_LABELS[m].replace('Deep ITM buy (ITM 5)','ITM5 buy') }}</button>{% endfor %}</div>
+  </div>
+  <div class="field"><span>Outcome</span>
+    <div class="seg" id="segOut"><button data-v="all" class="on">All</button><button data-v="win">Wins</button><button data-v="loss">Losses</button></div>
+  </div>
+  <div class="field"><span>Cross #</span>
+    <div class="seg" id="segCross"><button data-v="all" class="on">All</button><button data-v="1">1st</button><button data-v="2">2nd</button><button data-v="3">3rd</button><button data-v="4">4th+</button></div>
+  </div>
+  <div class="field"><span>Exit</span>
+    <select id="fExit"><option value="all">All exits</option><option value="REVERSAL">Reversal</option><option value="OPPOSITE_CROSS">Opposite cross</option><option value="SQUARE_OFF_15:00">Square-off 15:00</option><option value="whipsaw">Whipsaws only</option></select>
+  </div>
+</div>
+
+<div id="btError"></div>
+<div id="btBody">
+  <div class="card" id="btEmpty"></div>
+</div>
+
+<template id="tplBody">
+  <div class="kpis" id="kpis"></div>
+
+  <div class="split" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-head"><h3>Mode comparison</h3><span class="muted" style="font-size:12px">click a row to switch mode</span></div>
+      <div class="table-wrap"><table class="table" id="cmpTable"></table></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>Equity (net)</h3><span class="muted" style="font-size:12px" id="eqLabel"></span></div>
+      <div class="chart small" id="eqChart"></div>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <div class="card tradelist">
+      <div class="card-head"><h3>Trades <span class="faint" id="tlCount"></span></h3><span class="muted" style="font-size:12px"><span class="kbd">↑</span> <span class="kbd">↓</span> navigate</span></div>
+      <div class="tl-scroll" id="tradeList" tabindex="0"></div>
+    </div>
+    <div class="right-col">
+      <div class="card metabar" id="metabar"></div>
+      <div class="card chart-card">
+        <div class="card-head" style="padding:4px 6px 0">
+          <div class="legend" id="legend">
+            <span><i style="background:var(--amber)"></i>EMA 9</span>
+            <span><i style="background:var(--blue)"></i>EMA 21</span>
+            <span><b style="color:var(--green)">▲</b> entry</span>
+            <span><b style="color:var(--red)">▼</b> exit</span>
+            <span><b style="color:var(--accent)">●</b> signal bar</span>
+            <span class="faint" id="chartNote"></span>
+          </div>
+          <div class="seg" id="segChart"><button data-v="spot" class="on">NIFTY + EMAs</button><button data-v="option">Option premium</button></div>
+        </div>
+        <div class="chart" id="chart"></div>
+      </div>
+      <div class="split two">
+        <div class="card"><h3>Costs &amp; friction</h3><div id="costCard"></div></div>
+        <div class="card"><h3>Execution detail</h3><div id="execCard"></div></div>
+      </div>
+      <div class="card">
+        <details class="rules"><summary>No-trade days &amp; skipped entries <span class="faint" id="ntCount"></span></summary><div id="noTrade" style="margin-top:10px"></div></details>
+      </div>
+      <div class="card">
+        <details class="rules"><summary>Strategy rules &amp; how ambiguities are resolved</summary>
+          <ol>
+            <li><b>Signal:</b> 9 EMA vs 21 EMA on <b>closed</b> NIFTY spot bars, resampled from 1m and aligned to the 09:15 open (30m bars: 09:15, 09:45 … 15:15). EMAs are seeded with an SMA and run continuously across days (previous sessions warm them up).</li>
+            <li><b>Cross / ties:</b> a cross is the first closed bar whose sign(EMA9 − EMA21) differs from the last <i>non-zero</i> sign. An exact tie (difference = 0) is never a signal.</li>
+            <li><b>Fill bar:</b> signal time T = close of the signal bar. Orders fill at the <b>open of the option's 1-minute candle starting at T</b>. Missing candle → first candle within 5 min (flag <i>fill_delayed</i>), otherwise the entry is skipped (listed below); an exit falls back to the last close (flag <i>stale_exit</i>).</li>
+            <li><b>Entry window:</b> a cross can open a trade only if <b>start ≤ T ≤ cutoff</b> (inclusive).</li>
+            <li><b>Exit:</b> first opposite cross before 15:00 — even after the cutoff — else mandatory square-off at the 15:00 candle open.</li>
+            <li><b>Reversal:</b> an opposite cross inside the window closes the trade and opens the reverse trade at the same minute.</li>
+            <li><b>Contract:</b> strike from the signal-bar close, ATM = nearest 50 (halves round up). ITM5 = 5 strikes (250 pts) in the money. Bullish → buy CE / sell ATM PE; bearish → buy PE / sell ATM CE. Nearest weekly expiry on/after the trade date (0-DTE on expiry day).</li>
+            <li><b>Cross #:</b> the ordinal of the cross among crosses inside today's entry window (1st = first tradable signal of the day).</li>
+            <li><b>Friction:</b> buy fill = price × 1.005 + fixed pts, sell fill = price × 0.995 − fixed pts, floored at ₹0.05, rounded adversely to the 0.05 tick. Charges: ₹20/order brokerage, STT 0.15% on sell premium, NSE txn 0.03503%, SEBI ₹10/crore, stamp 0.003% on buys, GST 18% on brokerage + txn + SEBI.</li>
+            <li><b>Gross</b> = PnL on raw candle prices; <b>Net</b> = Gross − slippage − charges.</li>
+            <li><b>Whipsaw:</b> closed by an opposite cross within 2 signal bars of entry.</li>
+            <li><b>No-trade days:</b> no cross, no cross inside the window, or every entry skipped — all listed below.</li>
+            <li><b>Max drawdown %</b> is measured against peak equity, starting capital ₹2,00,000.</li>
+          </ol>
+        </details>
+      </div>
+    </div>
+  </div>
+</template>
+<div class="loading-overlay hidden" id="loading"><div class="loading-box"><div class="spinner"></div><div><b>Running backtest…</b><div class="muted" style="font-size:12px">first run computes, repeats come from cache</div></div></div></div>
+{% endblock %}
+{% block scripts %}
+<script>window.MODE_LABELS = {{ MODE_LABELS|tojson }}; window.LOT_SIZE = {{ LOT_SIZE }};</script>
+<script src="{{ url_for('static', filename='js/backtest.js') }}"></script>
+{% endblock %}
